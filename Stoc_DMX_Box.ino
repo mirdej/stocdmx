@@ -16,6 +16,7 @@ const char * version = "2020-02-27";
 #include <TeensyDMX.h>
 #include <Timer.h>
 #include <FastLED.h>
+#include <EEPROM.h>
 
 //========================================================================================
 //----------------------------------------------------------------------------------------
@@ -26,6 +27,12 @@ namespace teensydmx = ::qindesign::teensydmx;
 const int CABLE_MODE_DMX	= 0;
 const int CABLE_MODE_CHANGLIER = 1;
 
+const int MERGE_MODE_NONE = 0;
+const int MERGE_MODE_LTP = 1;
+const int MERGE_MODE_HTP = 2;			// not implemented
+
+#define SERIAL_DEBUG	true
+
 // .............................................................................Pins 
 
 const int 	PIN_PIXELS 			= 20;
@@ -34,7 +41,8 @@ const char	NUM_PIXELS			= 6;
 const char	NUM_UNIVERSES		= 4;
 const int 	DMX_TIMEOUT 		= 300;
 
-
+const int PANIC_BUF_SIZE		= 512;
+const int PANIC_BUF_ADDRESS = 64; 	// EEPROM Start address
 //========================================================================================
 //----------------------------------------------------------------------------------------
 //																				GLOBALS
@@ -49,10 +57,13 @@ Timer	t;
 uint8_t		dmx_rx_buffer[DMX_BUF_SIZE];
 uint8_t		midi_rx_buffer[NUM_UNIVERSES][16][128];
 uint8_t 	cable_mode[NUM_UNIVERSES];
+uint8_t 	merge_mode[NUM_UNIVERSES];
 int			activity[NUM_PIXELS];
 
 CRGB                                    pixels[NUM_PIXELS];
 CHSV									colors[NUM_PIXELS];
+
+uint8_t		panic_buffer[NUM_UNIVERSES][PANIC_BUF_SIZE];
 
 //========================================================================================
 //----------------------------------------------------------------------------------------
@@ -127,6 +138,34 @@ void dmx_set_changlier(uint8_t cable, uint8_t channel,	uint8_t controller,uint8_
 	}
 }
 
+//----------------------------------------------------------------------------------------
+//																	Panic Buffer
+
+void read_panic_buffer() {
+	int address;
+	
+	for (int cable = 0; cable < NUM_UNIVERSES; cable++) {
+		for (int i = 0; i < PANIC_BUF_SIZE; i++) {
+			address = cable * PANIC_BUF_SIZE + i;
+			address += PANIC_BUF_ADDRESS;
+			if(address < EEPROM.length()) {
+				panic_buffer[cable][i] = EEPROM.read(address);
+			}
+		}
+	}
+}
+
+
+void write_panic_buffer(uint8_t cable) {
+	int address;
+	for (int i = 0; i < PANIC_BUF_SIZE; i++) {
+		address = cable * PANIC_BUF_SIZE + i;
+		address += PANIC_BUF_ADDRESS;
+		if(address < EEPROM.length()) {
+			panic_buffer[cable][i] = EEPROM.read(address);
+		}
+	}
+}
 
 //----------------------------------------------------------------------------------------
 //																	LEDS
@@ -152,12 +191,16 @@ void update_leds() {
 //																				SETUP
 
 void setup() {
-	Serial.begin(115200);
-	while (!Serial && millis() < 4000) {}
-	Serial.println("STOCBOX Setting up");
-
+	#if SERIAL_DEBUG
+		Serial.begin(115200);
+		while (!Serial && millis() < 4000) {}
+		Serial.println("STOCBOX Setting up");
+	#endif
+	
 	FastLED.addLeds<NEOPIXEL, PIN_PIXELS>(pixels, NUM_PIXELS);
 
+	read_panic_buffer();
+	
 	dmxRx.begin();
 
 	universe_0.begin();
@@ -169,6 +212,11 @@ void setup() {
 	cable_mode[1] = CABLE_MODE_CHANGLIER;
 	cable_mode[2] = CABLE_MODE_DMX;
 	cable_mode[3] = CABLE_MODE_DMX;
+
+	merge_mode[0] = MERGE_MODE_NONE;
+	merge_mode[1] = MERGE_MODE_NONE;
+	merge_mode[2] = MERGE_MODE_NONE;
+	merge_mode[3] = MERGE_MODE_LTP;
 
 	t.every(100,update_leds);
 }
@@ -188,10 +236,12 @@ void loop() {
 		for (int i = 0; i < DMX_BUF_SIZE; i++) {
 			uint8_t v = dmxRx.get(i);
 			if (v != dmx_rx_buffer[i]) {				// output DMX only if received values Change
-				universe_3.set(i, v);
+				if (merge_mode[3] == MERGE_MODE_LTP) {
+					universe_3.set(i, v);
+					activity[3]++;
+				}
 				dmx_rx_buffer[i] = v;
 				activity[4]++;
-				activity[3]++;
 			}
 		}
 	}
@@ -204,6 +254,17 @@ void loop() {
 		uint8_t data1 = usbMIDI.getData1();
 		uint8_t data2 = usbMIDI.getData2();
 		uint8_t cable = usbMIDI.getCable();
+		
+		#if SERIAL_DEBUG
+			Serial.print("Cable ");
+			Serial.print(cable, DEC);
+			Serial.print(" : Control Change, ch=");
+			Serial.print(channel, DEC);
+			Serial.print(", control=");
+			Serial.print(data1, DEC);
+			Serial.print(", value=");
+			Serial.println(data2, DEC);
+		#endif
 		
 		if (cable < NUM_UNIVERSES) {
 			switch (type) {
