@@ -33,9 +33,6 @@ const int MERGE_MODE_HTP = 2;			// not implemented
 
 #define SERIAL_DEBUG	true
 
-// .............................................................................Pins 
-
-const int 	PIN_PIXELS 			= 20;
 const int 	DMX_BUF_SIZE		= 512;
 const char	NUM_PIXELS			= 6;
 const char	NUM_UNIVERSES		= 4;
@@ -43,13 +40,20 @@ const int 	DMX_TIMEOUT 		= 300;
 
 const int PANIC_BUF_SIZE		= 512;
 const int PANIC_BUF_ADDRESS = 64; 	// EEPROM Start address
+
+// .............................................................................Pins 
+
+const int 	PIN_PIXELS 						= 23;
+const int 	PIN_PANIC[NUM_UNIVERSES]		= {2,3,4,5};
+const int 	PIN_PANIC_SET[NUM_UNIVERSES]	= {9,10,11,12};
+
 //========================================================================================
 //----------------------------------------------------------------------------------------
 //																				GLOBALS
-teensydmx::Sender universe_1{Serial1};
-teensydmx::Sender universe_2{Serial2};
-teensydmx::Sender universe_3{Serial3};
-teensydmx::Sender universe_0{Serial4};
+teensydmx::Sender universe_0{Serial1};
+teensydmx::Sender universe_1{Serial2};
+teensydmx::Sender universe_2{Serial3};
+teensydmx::Sender universe_3{Serial4};
 teensydmx::Receiver dmxRx{Serial5};
 
 Timer	t;
@@ -63,6 +67,7 @@ int			activity[NUM_PIXELS];
 CRGB                                    pixels[NUM_PIXELS];
 CHSV									colors[NUM_PIXELS];
 
+uint8_t		out_buffer[NUM_UNIVERSES][PANIC_BUF_SIZE];
 uint8_t		panic_buffer[NUM_UNIVERSES][PANIC_BUF_SIZE];
 
 //========================================================================================
@@ -88,16 +93,20 @@ void dmx_set_default(uint8_t cable, uint8_t channel,	uint8_t controller,uint8_t 
 	
 	switch(cable) {
 		case 0:
-  			universe_0.set(slot, value);
+  			universe_0.set(slot + 1, value);
+  			out_buffer[0][slot] = value;
   			break;
 		case 1:
   			universe_1.set(slot, value);
+  			out_buffer[1][slot] = value;
   			break;
 		case 2:
   			universe_2.set(slot, value);
+  			out_buffer[2][slot] = value;
   			break;
 		case 3:
   			universe_3.set(slot, value);
+  			out_buffer[3][slot] = value;
   			break;
 		default:
 			break;
@@ -162,7 +171,12 @@ void write_panic_buffer(uint8_t cable) {
 		address = cable * PANIC_BUF_SIZE + i;
 		address += PANIC_BUF_ADDRESS;
 		if(address < EEPROM.length()) {
-			panic_buffer[cable][i] = EEPROM.read(address);
+			switch (cable) {
+				case 0:
+					panic_buffer[cable][i] = out_buffer[cable][i];
+					break;
+			}
+			EEPROM.write(address,panic_buffer[cable][i]);
 		}
 	}
 }
