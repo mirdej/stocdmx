@@ -15,7 +15,7 @@ const char * version = "2020-02-29.0";
 
 #include <TeensyDMX.h>
 #include <Timer.h>
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 #include <EEPROM.h>
 
 //========================================================================================
@@ -59,8 +59,9 @@ teensydmx::Receiver dmxRx{Serial5};
 
 Timer	t;
 
-Adafruit_NeoPixel pixels(NUM_PIXELS, PIN_PIXELS, NEO_GRB + NEO_KHZ800);
 
+CRGB                                    pixels[NUM_PIXELS];
+CHSV									colors[NUM_PIXELS];
 
 uint8_t		dmx_rx_buffer[DMX_BUF_SIZE];
 uint8_t		midi_rx_buffer[NUM_UNIVERSES][16][128];
@@ -215,18 +216,17 @@ void write_panic_buffer(uint8_t cable) {
 
 void update_leds() {
 	for (int i = 0; i < NUM_PIXELS; i++) {
-		if (activity[i] > 0) activity[i] += 3;		// basic brightness for low activity
+		if (i < NUM_UNIVERSES) {	colors[i].hue = 42;  }// yellow
+		else {	colors[i].hue = 120; }
+		colors[i].saturation = 220;
+		if (activity[i] > 0) activity[i] += 30;		// basic brightness for low activity
 		if (activity[i] > 255) activity[i] = 255;
-
-		if (i < NUM_UNIVERSES) {
-			if (cable_mode[i] ==  CABLE_MODE_DMX )	{
-									pixels.setPixelColor(i, pixels.Color(activity[i], activity[i], 0));						
-				}else {				pixels.setPixelColor(i, pixels.Color(0, activity[i], 0)); }
-		} else {					pixels.setPixelColor(i, pixels.Color(0, 0, activity[i])); }
+		colors[i].value =  activity[i];
 		activity[i] = 0;
+		pixels[i] = colors[i];
 	}
 	
-	pixels.show();
+	FastLED.show();
 }
 
 //----------------------------------------------------------------------------------------
@@ -377,14 +377,15 @@ void setup() {
 	#endif
 	
 	
- 	pixels.begin(); // INITIALIZE NeoPixel strip object (REQUIRED)
+	FastLED.addLeds<1,SK6812, PIN_PIXELS>(pixels, NUM_PIXELS);
+	
+	for (int hue = 0; hue < 360; hue++) {
+    	fill_rainbow( pixels, NUM_PIXELS, hue, 7);
+	    delay(3);
+    	FastLED.show(); 
+  	}
 
-	for(int i=0; i<NUM_PIXELS; i++) { // For each pixel...
-		pixels.clear(); // Set all pixel colors to 'off'
-		pixels.setPixelColor(i, pixels.Color(0, 150, 0));
-		pixels.show();   // Send the updated pixel colors to the hardware.
-		delay(100); // Pause before next pass through loop
-	  }  	
+
   	
 	#if SERIAL_DEBUG
 		Serial.println("Reading panic buffer");
@@ -417,6 +418,7 @@ void setup() {
 
 	t.every(40,check_dmx);
 	t.every(100,update_leds);
+	
 	#if TEST_METRICS
 		t.every(500,log_metrics);
 		Serial.println("--------------------");
